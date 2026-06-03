@@ -78,28 +78,8 @@ Processa as imagens uma por uma, em sequência. Para cada imagem:
 5. Armazena o resultado em memória
 
 Ao final, salva o tempo total em `tempo_serial.txt` e todos os resultados em `resultados_serial.csv`.
-### Tempo SERIAL.
-==================================================
-  Imagens processadas       : 13100
-  Total de rostos detectados: 0
-  Tempo total               : 506.39s
-  Throughput                : 25.9 imgs/s
-==================================================
-
----
 
 ### `paralelo.py` — Processamento Paralelo
-
-### Tempo PARALELO.
-==================================================
- Processos    Tempo (s)    Speedup   Eficiência
---------------------------------------------------
-         2       292.44       1.73x        86.6%
-         4       275.54       1.84x        46.0%
-         8       291.94       1.73x        21.7%
-        12       340.17       1.49x        12.4%
-==================================================
-
 Usa a mesma lógica de detecção do `serial.py`, mas distribui as imagens entre múltiplos processos usando `multiprocessing.Pool`. O script testa automaticamente 4 configurações:
 
 | Processos | Imagens por processo (aprox.) |
