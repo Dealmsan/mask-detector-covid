@@ -195,8 +195,10 @@ Tempo x Eficiência
 <img width="904" height="240" alt="image" src="https://github.com/user-attachments/assets/41aedac3-4477-4cea-9c8e-5a29bd0188c3" />
 
 Tempo
+
 <img width="466" height="231" alt="image" src="https://github.com/user-attachments/assets/d190553a-f9ad-4948-bf4e-68d1bbfa3d25" />
 
 Speed up
+
 <img width="453" height="204" alt="image" src="https://github.com/user-attachments/assets/daef4848-6839-4510-99ae-d21f0dddaefe" />
 
