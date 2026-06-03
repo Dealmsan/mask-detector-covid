@@ -78,7 +78,7 @@ Processa as imagens uma por uma, em sequência. Para cada imagem:
 5. Armazena o resultado em memória
 
 Ao final, salva o tempo total em `tempo_serial.txt` e todos os resultados em `resultados_serial.csv`.
-## Tempo SERIAL.
+### Tempo SERIAL.
 ==================================================
   Imagens processadas       : 13100
   Total de rostos detectados: 0
@@ -90,7 +90,7 @@ Ao final, salva o tempo total em `tempo_serial.txt` e todos os resultados em `re
 
 ### `paralelo.py` — Processamento Paralelo
 
-## Tempo PARALELO.
+### Tempo PARALELO.
 ==================================================
  Processos    Tempo (s)    Speedup   Eficiência
 --------------------------------------------------
