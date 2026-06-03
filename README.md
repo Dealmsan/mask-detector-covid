@@ -157,7 +157,7 @@ processos,imagens_por_processo,tempo_s,speedup,eficiencia_pct
 12,83,11.42,7.72,0.64
 ```
 
-## 📐 Métricas de Desempenho
+## 5. 📐 Métricas de Desempenho
 
 | Métrica | Fórmula | Significado |
 |---|---|---|
