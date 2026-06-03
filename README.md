@@ -186,6 +186,18 @@ DATASET-COVID-MASK/
 ├── classes.txt
 └── data.yaml
 ```
+**## Resultados de desempenho SERIAL/PARALELO
+
+Dataset: **13.100 imagens**
+
+| Versão | Processos | Tempo (s) | Throughput (imgs/s) | Speedup | Eficiência |
+|---------|-----------|------------|---------------------|----------|------------|
+| Serial | 1 | 506.39 | 25.9 | 1.00x | 100% |
+| Paralela | 2 | 292.44 | 44.8 | 1.73x | 86.6% |
+| Paralela | 4 | 275.54 | 47.5 | 1.84x | 46.0% |
+| Paralela | 8 | 291.94 | 44.9 | 1.73x | 21.7% |
+| Paralela | 12 | 340.17 | 38.5 | 1.49x | 12.4% |
+
 **## Gráficos**
 
 Tempo x Eficiência
