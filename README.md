@@ -190,7 +190,7 @@ DATASET-COVID-MASK/
 
 Dataset: **13.100 imagens**
 
-| Versão | Processos | Tempo (s) | Throughput (imgs/s) | Speedup | Eficiência |
+| Versão | Processos | Tempo (s) | Taxa de transferência(imgs/s) | Speedup | Eficiência |
 |---------|-----------|------------|---------------------|----------|------------|
 | Serial | 1 | 506.39 | 25.9 | 1.00x | 100% |
 | Paralela | 2 | 292.44 | 44.8 | 1.73x | 86.6% |
