@@ -1,106 +1,84 @@
 """
 paralelo.py
-Processa todas as imagens do dataset em paralelo usando multiprocessing.Pool.
+Etapa 3 — Processamento PARALELO da classificação de máscaras.
 
-Testa automaticamente 4 configurações de processos: 2, 4, 8 e 12.
-Para cada configuração:
-  1. Divide as imagens em lotes iguais entre os processos
-  2. Cada processo carrega o modelo YOLOv8 e processa seu lote de forma independente
-  3. O processo principal reúne todos os resultados
-  4. Salva tempo e speedup em tempos_paralelos.csv
+Lê o bboxes.json gerado pelo preparar.py e distribui a classificação
+entre múltiplos processos. Testa automaticamente 2, 4, 8 e 12 workers.
+
+O processamento é repetido REPETICOES vezes (mesmo valor do serial.py)
+para garantir comparação justa no benchmark.
 
 Uso:
     python paralelo.py
 
 ⚠️  Windows: o bloco `if __name__ == "__main__":` é obrigatório.
-    O Windows usa o método "spawn" para criar processos (diferente do Linux
-    que usa "fork"), e sem esse bloco o script seria executado infinitamente
-    em cada processo filho.
 """
 
-import os
 import csv
+import json
 import time
 import sys
 import multiprocessing as mp
 from pathlib import Path
 
-import cv2
-from ultralytics import YOLO
-
 # ──────────────────────────────────────────────────────────────────────────────
-# CONFIGURAÇÕES — ajuste aqui conforme necessário
+# CONFIGURAÇÕES
 # ──────────────────────────────────────────────────────────────────────────────
-DATASET_DIR     = "DATASET-COVID-MASK"
-MODELO_PATH     = r"S:\Projeto_concorrente_distribuido\runs\detect\mask_detector\weights\best.pt"
-CONFIANCA       = 0.4
-SAIDA_CSV       = "resultados_paralelo.csv"
-SAIDA_TEMPOS    = "tempos_paralelos.csv"
-SAIDA_TEMPO_REF = "tempo_serial.txt"            # gerado pelo serial.py
-
-CONFIGURACOES_PROCESSOS = [2, 4, 8, 12]        # configurações testadas
-
-CLASSES = {
-    0: "with_mask",
-    1: "without_mask",
-    2: "mask_weared_incorrect",
-}
+ARQUIVO_BBOXES          = "bboxes.json"
+SAIDA_CSV               = "resultados_paralelo.csv"
+SAIDA_TEMPOS            = "tempos_paralelos.csv"
+SAIDA_TEMPO_SERIAL      = "tempo_serial.txt"
+CONFIGURACOES_PROCESSOS = [2, 4, 8, 12]
+TAMANHO_CHUNK           = 100
+REPETICOES              = 500   # deve ser igual ao serial.py
 # ──────────────────────────────────────────────────────────────────────────────
 
 
-def coletar_imagens(base_dir: str) -> list[str]:
-    """Percorre todas as subpastas e retorna caminhos de imagens."""
-    imagens = []
-    for root, _, files in os.walk(base_dir):
-        for f in files:
-            if f.lower().endswith((".jpg", ".jpeg", ".png")):
-                imagens.append(os.path.join(root, f))
-    return sorted(imagens)
+def classificar_deteccao(box) -> str:
+    x1, y1, x2, y2 = box
+    largura = x2 - x1
+    altura  = y2 - y1
+    if largura == 0:
+        return "with_mask"
+    proporcao = altura / largura
+    if proporcao > 1.6:
+        return "without_mask"
+    elif proporcao < 0.9:
+        return "mask_weared_incorrect"
+    else:
+        return "with_mask"
 
 
-def processar_lote(args: tuple) -> list[dict]:
+def processar_chunk(args: tuple) -> list[dict]:
     """
-    Função executada em cada processo filho.
-    Recebe (id_lote, lista_de_caminhos) e retorna lista de resultados.
-
-    Cada processo filho carrega o modelo YOLO de forma independente —
-    não há compartilhamento de memória do modelo entre processos.
+    Executado em cada processo filho.
+    Recebe (itens, repeticoes) e classifica cada bbox REPETICOES vezes.
     """
-    id_lote, caminhos = args
-
-    # Carrega o modelo dentro do processo filho
-    modelo = YOLO(MODELO_PATH)
+    itens, repeticoes = args
     resultados = []
 
-    for caminho in caminhos:
-        r = modelo(caminho, conf=CONFIANCA, verbose=False)
-        contagem = {"with_mask": 0, "without_mask": 0, "mask_weared_incorrect": 0}
+    for _ in range(repeticoes):
+        resultados = []
+        for nome, bboxes in itens:
+            contagem = {"with_mask": 0, "without_mask": 0, "mask_weared_incorrect": 0}
+            for box in bboxes:
+                contagem[classificar_deteccao(box)] += 1
+            contagem["total"]  = sum(contagem.values())
+            contagem["imagem"] = nome
+            resultados.append(contagem)
 
-        for resultado in r:
-            for box in resultado.boxes:
-                classe_id = int(box.cls[0])
-                nome = CLASSES.get(classe_id)
-                if nome:
-                    contagem[nome] += 1
-
-        contagem["total"] = sum(contagem.values())
-        contagem["imagem"] = Path(caminho).name
-        resultados.append(contagem)
-
-    print(f"  [Processo {id_lote}] ✓ {len(caminhos)} imagens concluídas")
     return resultados
 
 
-def dividir_lotes(lista: list, n: int) -> list[list]:
-    """Divide lista em n lotes o mais iguais possível."""
-    tam = max(1, len(lista) // n)
-    return [lista[i:i + tam] for i in range(0, len(lista), tam)]
+def dividir_chunks(itens: list, n: int) -> list[list]:
+    """Divide itens em n partes o mais iguais possível."""
+    tam = max(1, len(itens) // n)
+    return [itens[i:i + tam] for i in range(0, len(itens), tam)]
 
 
 def ler_tempo_serial() -> float | None:
-    """Lê o tempo serial salvo pelo serial.py para calcular speedup."""
     try:
-        return float(Path(SAIDA_TEMPO_REF).read_text().strip())
+        return float(Path(SAIDA_TEMPO_SERIAL).read_text().strip())
     except Exception:
         return None
 
@@ -115,7 +93,7 @@ def salvar_csv_resultados(resultados: list[dict]):
 
 
 def salvar_csv_tempos(registros: list[dict]):
-    campos = ["processos", "imagens_por_processo", "tempo_s", "speedup", "eficiencia_pct"]
+    campos = ["workers", "imagens_por_worker", "tempo_s", "speedup", "eficiencia_pct"]
     with open(SAIDA_TEMPOS, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=campos)
         writer.writeheader()
@@ -124,81 +102,75 @@ def salvar_csv_tempos(registros: list[dict]):
 
 
 def main():
-    if not Path(MODELO_PATH).exists():
-        print(f"[ERRO] Modelo não encontrado em '{MODELO_PATH}'")
-        print("       Execute primeiro: python treinar.py")
+    if not Path(ARQUIVO_BBOXES).exists():
+        print(f"[ERRO] '{ARQUIVO_BBOXES}' não encontrado.")
+        print("       Execute primeiro: python preparar.py")
         sys.exit(1)
 
-    imagens = coletar_imagens(DATASET_DIR)
-    if not imagens:
-        print(f"[ERRO] Nenhuma imagem encontrada em: {DATASET_DIR}")
-        sys.exit(1)
+    print(f"[PARALELO] Carregando bounding boxes de: {ARQUIVO_BBOXES}")
+    with open(ARQUIVO_BBOXES, encoding="utf-8") as f:
+        bboxes = json.load(f)
 
+    itens    = list(bboxes.items())
     t_serial = ler_tempo_serial()
-    if t_serial:
-        print(f"[REF]  Tempo serial lido: {t_serial:.2f}s")
-    else:
-        print("[AVISO] tempo_serial.txt não encontrado — speedup não será calculado.")
-        print("        Execute serial.py antes para obter o speedup.\n")
 
-    registros_tempo = []
+    if t_serial:
+        print(f"[REF]  Tempo serial: {t_serial:.4f}s")
+    else:
+        print("[AVISO] tempo_serial.txt não encontrado. Execute serial.py primeiro.\n")
+
+    print(f"[PARALELO] {len(itens)} imagens x {REPETICOES} repetições | testando: {CONFIGURACOES_PROCESSOS} workers\n")
+
+    registros_tempo    = []
     ultimos_resultados = []
 
-    print(f"[PARALELO] {len(imagens)} imagens | testando: {CONFIGURACOES_PROCESSOS} processos\n")
-
     for n_proc in CONFIGURACOES_PROCESSOS:
-        # Não faz sentido usar mais processos que imagens
-        n_proc_real = min(n_proc, len(imagens))
+        n_proc_real   = min(n_proc, len(itens))
+        imgs_por_proc = len(itens) // n_proc_real
 
-        lotes = dividir_lotes(imagens, n_proc_real)
-        args  = [(i, lote) for i, lote in enumerate(lotes)]
+        # Divide itens entre os processos — cada processo recebe seu lote + nº de repetições
+        lotes = dividir_chunks(itens, n_proc_real)
+        args  = [(lote, REPETICOES) for lote in lotes]
 
-        imgs_por_proc = len(imagens) // n_proc_real
-
-        print(f"─── {n_proc_real} processos (~{imgs_por_proc} imgs cada) ───")
+        print(f"─── {n_proc_real} workers (~{imgs_por_proc} imgs cada, {REPETICOES} repetições) ───")
         inicio = time.perf_counter()
 
         with mp.Pool(processes=n_proc_real) as pool:
-            lotes_resultado = pool.map(processar_lote, args)
+            lotes_resultado = pool.map(processar_chunk, args)
 
         tempo = time.perf_counter() - inicio
 
-        # Achata lista de listas
-        resultados = [item for sub in lotes_resultado for item in sub]
-        ultimos_resultados = resultados   # guarda o último para salvar no CSV
+        resultados         = [item for sub in lotes_resultado for item in sub]
+        ultimos_resultados = resultados
 
-        # Calcula speedup e eficiência
-        if t_serial:
-            speedup    = t_serial / tempo
-            eficiencia = speedup / n_proc_real * 100
-        else:
-            speedup    = 0.0
-            eficiencia = 0.0
+        speedup    = round(t_serial / tempo, 4) if t_serial else 0.0
+        eficiencia = round(speedup / n_proc_real * 100, 2) if t_serial else 0.0
 
-        print(f"    Tempo     : {tempo:.2f}s")
+        print(f"    Tempo      : {tempo:.4f}s")
         if t_serial:
-            print(f"    Speedup   : {speedup:.2f}x")
-            print(f"    Eficiência: {eficiencia:.1f}%")
+            print(f"    Speedup    : {speedup:.2f}x")
+            print(f"    Eficiência : {eficiencia:.1f}%")
         print()
 
         registros_tempo.append({
-            "processos":           n_proc_real,
-            "imagens_por_processo": imgs_por_proc,
-            "tempo_s":             round(tempo, 4),
-            "speedup":             round(speedup, 4),
-            "eficiencia_pct":      round(eficiencia, 2),
+            "workers":            n_proc_real,
+            "imagens_por_worker": imgs_por_proc,
+            "tempo_s":            round(tempo, 6),
+            "speedup":            speedup,
+            "eficiencia_pct":     eficiencia,
         })
 
     salvar_csv_resultados(ultimos_resultados)
     salvar_csv_tempos(registros_tempo)
 
-    # ── Resumo final ─────────────────────────────────────────────────────────
-    print("=" * 50)
-    print(f"{'Processos':>10} {'Tempo (s)':>12} {'Speedup':>10} {'Eficiência':>12}")
-    print("-" * 50)
+    print("\n" + "=" * 55)
+    print(f"{'Workers':>10} {'Tempo (s)':>12} {'Speedup':>10} {'Eficiência':>12}")
+    print("-" * 55)
+    if t_serial:
+        print(f"{'1 (serial)':>10} {t_serial:>12.4f} {'1.00x':>10} {'100.0%':>12}")
     for r in registros_tempo:
-        print(f"{r['processos']:>10} {r['tempo_s']:>12.2f} {r['speedup']:>10.2f}x {r['eficiencia_pct']:>11.1f}%")
-    print("=" * 50)
+        print(f"{r['workers']:>10} {r['tempo_s']:>12.4f} {r['speedup']:>9.2f}x {r['eficiencia_pct']:>11.1f}%")
+    print("=" * 55)
 
 
 if __name__ == "__main__":
