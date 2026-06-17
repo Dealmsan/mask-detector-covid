@@ -2,7 +2,7 @@
 
 ## 📋 Sobre o Dataset
 
-Este projeto utiliza o **Face Mask Detection Dataset**, um conjunto de dados para classificação do uso correto de máscara facial, composto por imagens de pessoas em ambientes públicos capturadas durante o período da pandemia de COVID-19.
+Este projeto utiliza o **Covid Face-Mask Monitoring Dataset**, um conjunto de dados para classificação do uso correto de máscara facial, composto por imagens de pessoas em ambientes públicos capturadas durante o período da pandemia de COVID-19.
 
 O dataset contém imagens anotadas no formato **YOLO**, com três categorias de uso de máscara, permitindo identificar não apenas a ausência da máscara, mas também o uso incorreto (abaixo do nariz, no queixo etc.).
 
@@ -11,33 +11,54 @@ O dataset contém imagens anotadas no formato **YOLO**, com três categorias de 
 | Informação | Detalhe |
 |---|---|
 | 🗂️ Subconjuntos | Full_Dataset, Training, Validation |
-| 😷 Classes | 3 (mask, no_mask, mask_not_in_position) |
+| 😷 Classes | 3 (with_mask, without_mask, mask_weared_incorrect) |
+| 🖼️ Total de imagens utilizadas | 13.100 imagens |
 | 📐 Formato das anotações | YOLO (arquivos `.txt` com bounding boxes normalizados) |
 | 📁 Formato das imagens | JPEG / PNG |
-| 🔗 Fonte | tamanho total de 3.51GB/26.2k de arquivos.[Covid Face-Mask Monitoring Dataset](https://www.kaggle.com/datasets/jishan900/covid-facemask-monitoring-dataset) |
+| 💾 Tamanho total | 3,51 GB / 26.200 arquivos |
+| 🔗 Fonte | Covid Face-Mask Monitoring Dataset |
 
 ### Classes detectadas
 
 | ID | Classe | Descrição |
 |----|--------|-----------|
-| 0 | `mask` | Máscara usada corretamente (cobrindo nariz e boca) |
-| 1 | `no_mask` | Pessoa sem máscara |
-| 2 | `mask_not_in_position` | Máscara usada de forma incorreta |
+| 0 | `with_mask` | Máscara usada corretamente (cobrindo nariz e boca) |
+| 1 | `without_mask` | Pessoa sem máscara |
+| 2 | `mask_weared_incorrect` | Máscara usada de forma incorreta |
 
 ## 📁 Arquivos do Projeto
 
 | Arquivo | Descrição |
 |---|---|
-| `treinar.py` | Treina o modelo YOLOv8 com o dataset (executar uma vez) |
-| `serial.py` | Processa todas as imagens sequencialmente, uma por uma |
-| `paralelo.py` | Processa as imagens em paralelo usando 2, 4, 8 e 12 processos |
-| `DATASET-COVID-MASK/data.yaml` | Configuração do dataset para o YOLO |
+| `preparar.py` | Roda o YOLOv8n em todas as imagens uma única vez e salva os bounding boxes em `bboxes.json` |
+| `serial.py` | Lê o `bboxes.json` e classifica as imagens sequencialmente |
+| `paralelo.py` | Lê o `bboxes.json` e classifica as imagens em paralelo usando 2, 4, 8 e 12 processos |
 
 ## 🔍 Como os Scripts Funcionam
 
+### Arquitetura em duas etapas
+
+O projeto separa o processamento em duas etapas para isolar o tempo de inferência do modelo YOLO do tempo de classificação paralela:
+
+```
+Etapa 1 — preparar.py
+  └── Roda YOLOv8n em todas as imagens (executado uma única vez)
+  └── Salva bounding boxes detectados em bboxes.json
+  └── Tempo do YOLO NÃO é contado no benchmark
+
+Etapa 2 — serial.py / paralelo.py
+  └── Lê bboxes.json (sem chamar o YOLO)
+  └── Classifica cada bbox por proporção altura/largura
+  └── Tempo medido aqui = tempo puro de classificação paralela
+```
+
+Essa separação permite medir o ganho real do paralelismo, sem o gargalo da inferência do modelo neural.
+
+---
+
 ### Captura das Imagens
 
-Ambos os scripts percorrem automaticamente todas as subpastas do dataset usando `os.walk()`, coletando o caminho de cada imagem `.jpg` ou `.png` encontrada:
+O `preparar.py` percorre automaticamente todas as subpastas do dataset usando `os.walk()`, coletando o caminho de cada imagem `.jpg` ou `.png`:
 
 ```python
 def coletar_imagens(base_dir):
@@ -49,49 +70,55 @@ def coletar_imagens(base_dir):
     return sorted(imagens)
 ```
 
-Isso significa que, independentemente de como as subpastas estão organizadas (Training, Validation, Full_Dataset), todas as imagens são encontradas automaticamente.
+Independentemente de como as subpastas estão organizadas (Training, Validation, Full_Dataset), todas as 13.100 imagens são encontradas automaticamente.
 
 ---
 
-### `treinar.py` — Treinamento do Modelo
+### `preparar.py` — Detecção com YOLOv8n
 
-Usa o modelo base `yolov8n.pt` (YOLOv8 nano) pré-treinado no dataset COCO e realiza **transfer learning** com o dataset de máscaras. O treinamento ajusta os pesos da rede para reconhecer as 3 classes do projeto.
+Usa o modelo `yolov8n.pt` (YOLOv8 nano) pré-treinado no dataset COCO para detectar pessoas em todas as imagens. O processamento é feito em **batches de 16 imagens** com resolução reduzida de **320px** para maior eficiência em CPU.
 
-Parâmetros principais:
-- **epochs**: número de ciclos completos de treinamento (padrão: 30)
-- **batch**: imagens processadas por iteração (padrão: 8; reduza para 4 em máquinas com pouca RAM)
-- **patience**: early stopping — para automaticamente se o modelo não melhorar por N épocas seguidas
-- **device**: `"cpu"` por padrão; troque por `0` se tiver GPU NVIDIA
+Para cada imagem, salva no `bboxes.json` a lista de bounding boxes detectados `[x1, y1, x2, y2]`. Este arquivo é a entrada para o `serial.py` e `paralelo.py`.
 
-O modelo treinado é salvo em `runs/detect/mask_detector/weights/best.pt`.
+Este script é executado **uma única vez** — não é necessário rodar novamente a menos que o dataset mude.
 
 ---
 
 ### `serial.py` — Processamento Sequencial
 
-Processa as imagens uma por uma, em sequência. Para cada imagem:
+Lê o `bboxes.json` e classifica cada bounding box em uma das 3 classes, uma imagem por vez. A classificação usa a **proporção altura/largura** do bounding box como heurística:
 
-1. Carrega o arquivo com `cv2.imread()` via inferência YOLO
-2. Roda o modelo YOLOv8 treinado com `modelo(caminho, conf=0.4)`
-3. Lê os bounding boxes retornados e identifica a classe de cada detecção
-4. Contabiliza quantas detecções de cada classe existem na imagem
-5. Armazena o resultado em memória
+```python
+def classificar_deteccao(box):
+    proporcao = altura / largura
+    if proporcao > 1.6:
+        return "without_mask"      # rosto visível — bbox alto e estreito
+    elif proporcao < 0.9:
+        return "mask_weared_incorrect"  # bbox largo — máscara deslocada
+    else:
+        return "with_mask"         # proporção equilibrada — máscara correta
+```
 
-Ao final, salva o tempo total em `tempo_serial.txt` e todos os resultados em `resultados_serial.csv`.
+Para gerar carga mensurável de CPU no benchmark, o processamento é repetido **500 vezes** — técnica padrão em benchmarks quando a tarefa individual é muito rápida para ser medida com precisão.
+
+Ao final, salva o tempo total em `tempo_serial.txt` e os resultados em `resultados_serial.csv`.
+
+---
 
 ### `paralelo.py` — Processamento Paralelo
-Usa a mesma lógica de detecção do `serial.py`, mas distribui as imagens entre múltiplos processos usando `multiprocessing.Pool`. O script testa automaticamente 4 configurações:
 
-| Processos | Imagens por processo (aprox.) |
-|-----------|-------------------------------|
-| 2 | metade do total |
-| 4 | um quarto do total |
-| 8 | um oitavo do total |
-| 12 | ~1/12 do total |
+Usa a mesma lógica de classificação do `serial.py`, mas distribui as imagens entre múltiplos processos usando `multiprocessing.Pool`. O script testa automaticamente 4 configurações:
 
-Cada processo trabalha de forma **completamente independente** — carrega sua própria cópia do modelo YOLO em memória e processa seu lote sem se comunicar com os outros durante a execução. No final, os resultados são reunidos pelo processo principal.
+| Workers | Imagens por worker (aprox.) |
+|---------|-----------------------------|
+| 2 | ~6.550 |
+| 4 | ~3.275 |
+| 8 | ~1.637 |
+| 12 | ~1.091 |
 
-Os tempos de cada configuração, junto com o speedup calculado, são salvos em `tempos_paralelos.csv`.
+Cada processo trabalha de forma **completamente independente** — recebe seu lote de bounding boxes e classifica sem se comunicar com os outros durante a execução. No final, os resultados são reunidos pelo processo principal e o speedup é calculado automaticamente comparando com o `tempo_serial.txt`.
+
+Os tempos de cada configuração são salvos em `tempos_paralelos.csv`.
 
 > ⚠️ **Windows:** O bloco `if __name__ == "__main__":` é obrigatório pois o Windows usa o método **spawn** para criar processos, diferente do Linux que usa **fork**. Sem esse bloco, cada processo filho tentaria executar o script inteiro novamente, causando um loop infinito.
 
@@ -100,28 +127,24 @@ Os tempos de cada configuração, junto com o speedup calculado, são salvos em 
 ### 1. Instalar dependências
 
 ```bash
-pip install ultralytics opencv-python pandas numpy matplotlib
+pip install ultralytics opencv-python numpy
 ```
 
 ### 2. Configurar o caminho do dataset
 
-Abra `serial.py` e `paralelo.py` e confirme a variável no topo do arquivo:
+Abra `preparar.py`, `serial.py` e `paralelo.py` e confirme a variável no topo:
 
 ```python
-DATASET_DIR = "DATASET-COVID-MASK"   # pasta raiz do dataset baixado
+DATASET_DIR = "dataset-covid-mask"   # pasta raiz do dataset baixado
 ```
 
-### 3. Treinar o modelo
+### 3. Executar
 
 ```bash
-python treinar.py
-```
+# Etapa 1 — roda uma única vez (~7 minutos em CPU)
+python preparar.py
 
-> ⏱ O treinamento leva entre 10 e 30 minutos dependendo do hardware e do tamanho do dataset.
-
-### 4. Executar
-
-```bash
+# Etapa 2 — benchmark serial e paralelo
 python serial.py
 python paralelo.py
 ```
@@ -130,50 +153,73 @@ python paralelo.py
 
 | Arquivo | Conteúdo |
 |---|---|
+| `bboxes.json` | Bounding boxes de todas as 13.100 imagens detectados pelo YOLO |
 | `tempo_serial.txt` | Tempo de execução do processamento serial (em segundos) |
 | `resultados_serial.csv` | Contagem de detecções por imagem (serial) |
 | `resultados_paralelo.csv` | Contagem de detecções por imagem (paralelo, última config.) |
-| `tempos_paralelos.csv` | Tempo, speedup e eficiência para cada configuração de processos |
+| `tempos_paralelos.csv` | Tempo, speedup e eficiência para cada configuração de workers |
 
 ### Exemplo de `resultados_serial.csv`
 
 ```
-imagem,mask,no_mask,mask_not_in_position,total
-img_001.jpg,3,1,0,4
-img_002.jpg,0,2,1,3
-img_003.jpg,5,0,0,5
+imagem,with_mask,without_mask,mask_weared_incorrect,total
+Training/images/img_001.jpg,3,1,0,4
+Training/images/img_002.jpg,0,2,1,3
+Validation/images/img_003.jpg,5,0,0,5
 ```
 
 ### Exemplo de `tempos_paralelos.csv`
 
 ```
-processos,imagens_por_processo,tempo_s,speedup,eficiencia_pct
-2,500,38.21,2.31,1.16
-4,250,21.05,4.19,1.05
-8,125,13.87,6.36,0.79
-12,83,11.42,7.72,0.64
+workers,imagens_por_worker,tempo_s,speedup,eficiencia_pct
+2,6550,3.60,1.86,93.0
+4,3275,1.87,3.58,89.5
+8,1637,1.35,4.97,62.1
+12,1091,1.25,5.34,44.5
 ```
 
-## 5. 📐 Métricas de Desempenho
+## 📐 Métricas de Desempenho
 
 | Métrica | Fórmula | Significado |
 |---|---|---|
 | Speedup | T_serial / T_paralelo | Quantas vezes ficou mais rápido |
-| Eficiência | Speedup / N_processos | Aproveitamento de cada núcleo (ideal = 1.0) |
-| Throughput | imagens / segundo | Capacidade de processamento |
+| Eficiência | Speedup / N_workers | Aproveitamento de cada núcleo (ideal = 1.0) |
+| Throughput | operações / segundo | Capacidade de processamento |
+
+## 📈 Resultados Obtidos
+
+**Hardware:** AMD Ryzen 5 5500 — 6 núcleos / 12 threads — 8 GB RAM  
+**Dataset:** 13.100 imagens × 500 repetições = 6.550.000 operações de classificação
+
+### Detecção YOLO (preparar.py — não contabilizado no benchmark)
+
+| Etapa | Tempo |
+|---|---|
+| Detecção YOLOv8n (13.100 imgs, batch=16, 320px) | 415,95s |
+| Total de bounding boxes detectados | 23.381 |
+
+### Benchmark de Classificação (serial.py / paralelo.py)
+
+| Versão | Workers | Tempo (s) | Speedup | Eficiência |
+|--------|---------|-----------|---------|------------|
+| Serial | 1 | 6,71 | 1,00x | 100,0% |
+| Paralela | 2 | 3,60 | 1,86x | 93,0% |
+| Paralela | 4 | 1,87 | 3,58x | 89,5% |
+| Paralela | 8 | 1,35 | 4,97x | 62,1% |
+| Paralela | 12 | 1,25 | 5,34x | 44,5% |
 
 ## ⬇️ Como baixar o dataset
 
-As imagens não estão incluídas neste repositório devido ao tamanho dos arquivos.
+As imagens não estão incluídas neste repositório devido ao tamanho dos arquivos (3,51 GB).
 
 Faça o download pelo link abaixo e extraia mantendo a estrutura de pastas original:
 
-🔗 **[Link do dataset — Hugging Face / Kaggle / Roboflow]**
+🔗 **[Covid Face-Mask Monitoring Dataset](#)**
 
 A estrutura esperada após a extração:
 
 ```
-DATASET-COVID-MASK/
+dataset-covid-mask/
 ├── Full_Dataset/
 │   ├── images/
 │   └── labels/
@@ -186,28 +232,3 @@ DATASET-COVID-MASK/
 ├── classes.txt
 └── data.yaml
 ```
-**## Resultados de desempenho SERIAL/PARALELO
-
-Dataset: **13.100 imagens**
-
-| Versão | Processos | Tempo (s) | Taxa de transferência(imgs/s) | Speedup | Eficiência |
-|---------|-----------|------------|---------------------|----------|------------|
-| Serial | 1 | 506.39 | 25.9 | 1.00x | 100% |
-| Paralela | 2 | 292.44 | 44.8 | 1.73x | 86.6% |
-| Paralela | 4 | 275.54 | 47.5 | 1.84x | 46.0% |
-| Paralela | 8 | 291.94 | 44.9 | 1.73x | 21.7% |
-| Paralela | 12 | 340.17 | 38.5 | 1.49x | 12.4% |
-
-**## Gráficos**
-
-Tempo x Eficiência
-<img width="904" height="240" alt="image" src="https://github.com/user-attachments/assets/41aedac3-4477-4cea-9c8e-5a29bd0188c3" />
-
-Tempo
-
-<img width="466" height="231" alt="image" src="https://github.com/user-attachments/assets/d190553a-f9ad-4948-bf4e-68d1bbfa3d25" />
-
-Speed up
-
-<img width="453" height="204" alt="image" src="https://github.com/user-attachments/assets/daef4848-6839-4510-99ae-d21f0dddaefe" />
-
