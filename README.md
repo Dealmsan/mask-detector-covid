@@ -237,7 +237,8 @@ workers,imagens_por_worker,tempo_s,speedup,eficiencia_pct
 
 **Tempo, speedup e eficiência por número de workers:**
 
-![Gráfico de speedup](grafico_speedup.png)
+![Gráfico de speedup](<img width="2234" height="770" alt="grafico_speedup" src="https://github.com/user-attachments/assets/4b34f4a1-5d2f-4d83-8144-77ac42780b6d" />
+)
 
 **Distribuição das classes detectadas:**
 
