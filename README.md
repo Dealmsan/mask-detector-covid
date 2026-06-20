@@ -249,7 +249,7 @@ As imagens não estão incluídas neste repositório devido ao tamanho dos arqui
 
 Faça o download pelo link abaixo e extraia mantendo a estrutura de pastas original:
 
-🔗 **[Covid Face-Mask Monitoring Dataset](#)**
+🔗 **[https://www.kaggle.com/datasets/jishan900/covid-facemask-monitoring-dataset](#)**
 
 A estrutura esperada após a extração:
 
