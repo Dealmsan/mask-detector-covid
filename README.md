@@ -1,5 +1,18 @@
 # 😷 Projeto Programação CD — Detecção de Máscara COVID-19
 
+## 🎯 Objetivo do Trabalho
+
+Este projeto foi desenvolvido para a disciplina de **Programação Concorrente e Distribuída**, com dois objetivos complementares:
+
+1. **Técnico** — demonstrar conceitos de programação concorrente aplicados a um problema real de visão computacional, comparando desempenho serial vs. paralelo, calculando speedup e eficiência.
+
+2. **Social** — oferecer uma ferramenta capaz de auxiliar na análise do comportamento de pessoas em ambientes públicos durante crises sanitárias, como a pandemia de COVID-19. A automação da identificação do uso correto, incorreto ou ausência de máscara facial pode apoiar:
+   - Estudos epidemiológicos sobre adesão a medidas de proteção
+   - Monitoramento de ambientes públicos (estabelecimentos, transporte, eventos)
+   - Geração de dados quantitativos para políticas públicas de saúde
+
+A ideia central é mostrar que ferramentas de processamento concorrente não servem apenas para ganho de performance — elas também tornam viável a análise de grandes volumes de dados (no caso, 13 mil imagens) em um tempo prático, algo que seria inviável de fazer manualmente.
+
 ## 📋 Sobre o Dataset
 
 Este projeto utiliza o **Covid Face-Mask Monitoring Dataset**, um conjunto de dados para classificação do uso correto de máscara facial, composto por imagens de pessoas em ambientes públicos capturadas durante o período da pandemia de COVID-19.
@@ -33,6 +46,7 @@ O dataset contém imagens anotadas no formato **YOLO**, com três categorias de 
 | `preparar.py` | Roda o YOLOv8n em todas as imagens uma única vez e salva os bounding boxes em `bboxes.json` |
 | `serial.py` | Lê o `bboxes.json` e classifica as imagens sequencialmente |
 | `paralelo.py` | Lê o `bboxes.json` e classifica as imagens em paralelo usando 2, 4, 8 e 12 processos |
+| `graficos.py` | Gera os gráficos de desempenho e distribuição de classes a partir dos CSVs |
 
 ## 🔍 Como os Scripts Funcionam
 
@@ -127,7 +141,7 @@ Os tempos de cada configuração são salvos em `tempos_paralelos.csv`.
 ### 1. Instalar dependências
 
 ```bash
-pip install ultralytics opencv-python numpy
+pip install ultralytics opencv-python numpy matplotlib
 ```
 
 ### 2. Configurar o caminho do dataset
@@ -141,12 +155,15 @@ DATASET_DIR = "dataset-covid-mask"   # pasta raiz do dataset baixado
 ### 3. Executar
 
 ```bash
-# Etapa 1 — roda uma única vez (~7 minutos em CPU)
+# Etapa 1 — roda uma única vez
 python preparar.py
 
 # Etapa 2 — benchmark serial e paralelo
 python serial.py
 python paralelo.py
+
+# Etapa 3 — gera os gráficos
+python graficos.py
 ```
 
 ## 📤 Arquivos Gerados
@@ -158,6 +175,8 @@ python paralelo.py
 | `resultados_serial.csv` | Contagem de detecções por imagem (serial) |
 | `resultados_paralelo.csv` | Contagem de detecções por imagem (paralelo, última config.) |
 | `tempos_paralelos.csv` | Tempo, speedup e eficiência para cada configuração de workers |
+| `grafico_speedup.png` | Tempo, speedup e eficiência por número de workers |
+| `grafico_classes.png` | Distribuição das 3 classes detectadas |
 
 ### Exemplo de `resultados_serial.csv`
 
@@ -188,7 +207,6 @@ workers,imagens_por_worker,tempo_s,speedup,eficiencia_pct
 
 ## 📈 Resultados Obtidos
 
-**Hardware:** AMD Ryzen 5 5500 — 6 núcleos / 12 threads — 8 GB RAM  
 **Dataset:** 13.100 imagens × 500 repetições = 6.550.000 operações de classificação
 
 ### Detecção YOLO (preparar.py — não contabilizado no benchmark)
@@ -208,13 +226,30 @@ workers,imagens_por_worker,tempo_s,speedup,eficiencia_pct
 | Paralela | 8 | 1,35 | 4,97x | 62,1% |
 | Paralela | 12 | 1,25 | 5,34x | 44,5% |
 
+### Gráficos
+
+<!--
+  Depois de rodar `python graficos.py`, os arquivos
+  grafico_speedup.png e grafico_classes.png serão gerados
+  na raiz do projeto. Adicione-os ao repositório e a sintaxe
+  abaixo vai exibi-los automaticamente no GitHub.
+-->
+
+**Tempo, speedup e eficiência por número de workers:**
+
+![Gráfico de speedup](grafico_speedup.png)
+
+**Distribuição das classes detectadas:**
+
+![Gráfico de classes](grafico_classes.png)
+
 ## ⬇️ Como baixar o dataset
 
 As imagens não estão incluídas neste repositório devido ao tamanho dos arquivos (3,51 GB).
 
 Faça o download pelo link abaixo e extraia mantendo a estrutura de pastas original:
 
-🔗 **[Covid Face-Mask Monitoring Dataset](#)**
+🔗 **[https://www.kaggle.com/datasets/jishan900/covid-facemask-monitoring-dataset](#)**
 
 A estrutura esperada após a extração:
 
